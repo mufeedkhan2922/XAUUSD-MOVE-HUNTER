@@ -22,6 +22,8 @@ def walk_forward(
     step_bars: int = 500,
     thresholds: list[int] | None = None,
     horizon: int = 36,
+    spread: float = 0.0,
+    slippage: float = 0.0,
 ) -> dict[str, Any]:
     if thresholds is None:
         thresholds = [60, 65, 70, 75, 80]
@@ -41,7 +43,7 @@ def walk_forward(
         test = _slice(ordered, cursor + train_bars, cursor + train_bars + test_bars)
 
         train_results = {
-            threshold: run_backtest(train, min_score=threshold, horizon=horizon)
+            threshold: run_backtest(train, min_score=threshold, horizon=horizon, spread=spread, slippage=slippage)
             for threshold in thresholds
         }
 
@@ -59,7 +61,7 @@ def walk_forward(
         chosen = max(viable or candidates, key=lambda x: (x[1], x[2], x[3]))
         chosen_threshold = chosen[3]
 
-        test_result = run_backtest(test, min_score=chosen_threshold, horizon=horizon)
+        test_result = run_backtest(test, min_score=chosen_threshold, horizon=horizon, spread=spread, slippage=slippage)
         windows.append({
             "train_start": str(train[0]["datetime"]),
             "train_end": str(train[-1]["datetime"]),
