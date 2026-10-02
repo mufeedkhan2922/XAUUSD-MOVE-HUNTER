@@ -1,16 +1,33 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+
+from app.journal import read_setups, record_setup
 from app.market_data import MarketDataError, get_market_snapshot
 from app.signal_engine import analyze_market
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
-    version="0.1.0",
+    version="0.2.0",
     description="Research-first XAUUSD 5M expansion detection engine.",
 )
 
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard() -> str:
+    path = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
+    return path.read_text(encoding="utf-8")
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "xauusd-move-hunter", "live_trading_enabled": False}
+    return {
+        "status": "ok",
+        "service": "xauusd-move-hunter",
+        "live_trading_enabled": False,
+    }
+
 
 @app.get("/api/v1/market")
 def market(candles: int = 500) -> dict:
@@ -19,10 +36,19 @@ def market(candles: int = 500) -> dict:
     except MarketDataError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+
 @app.get("/api/v1/signal")
-def signal(candles: int = 500) -> dict:
+def signal(candles: int = 500, journal: bool = False) -> dict:
     try:
         snapshot = get_market_snapshot(candles)
     except MarketDataError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return analyze_market(snapshot)
+    result = analyze_market(snapshot)
+    if journal:
+        record_setup(result)
+    return result
+
+
+@app.get("/api/v1/journal")
+def journal(limit: int = 100) -> dict:
+    return {"setups": read_setups(max(1, min(limit, 500)))}
