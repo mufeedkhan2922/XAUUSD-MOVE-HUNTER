@@ -60,14 +60,14 @@ def research_report(
 
     frame = pd.DataFrame(candles)
     frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True, errors="coerce")
-    frame = frame.dropna(subset=["datetime"]).sort_values("datetime")
+    frame = frame.dropna(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
     frame["hour_utc"] = frame["datetime"].dt.hour
     frame["session"] = pd.cut(
         frame["hour_utc"],
         bins=[-1, 7, 12, 21, 23],
         labels=["ASIA", "LONDON", "NEW_YORK", "LATE"],
     )
-    hour_map = frame.set_index(frame.index)["session"].to_dict()
+    hour_map = frame["session"].to_dict()
 
     for t in trades:
         idx = int(t.get("signal_index", -1))
