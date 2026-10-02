@@ -307,7 +307,7 @@ def run_backtest(
             }
             for t in trades
         ],
-    }        # Aggregate realized P&L from the partial target ladder.
+    }    # Aggregate realized P&L from the partial target ladder.
     r_results: list[float] = [float(t.realized_r) for t in trades]
 
     wins = [x for x in r_results if x > 0]
