@@ -88,10 +88,11 @@ class PaperBook:
             risk = abs(position.entry - position.stop)
 
             if risk > 0:
-                favourable = (price - position.entry) * sign
-                adverse = (price - position.entry) * sign
+                excursion = (price - position.entry) * sign
+                favourable = max(excursion, 0.0)
+                adverse = max(-excursion, 0.0)
                 position.mfe_r = max(position.mfe_r, favourable / risk)
-                position.mae_r = min(position.mae_r, adverse / risk)
+                position.mae_r = max(position.mae_r, adverse / risk)
 
             hit_stop = price <= position.stop if position.direction == "BULLISH" else price >= position.stop
             hit_target = bool(position.targets) and (
