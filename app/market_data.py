@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -10,11 +11,15 @@ load_dotenv()
 class MarketDataError(RuntimeError):
     pass
 
+_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
+
+
 def _api_key() -> str:
     key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
     if not key:
         raise MarketDataError("TWELVE_DATA_API_KEY is not configured.")
     return key
+
 
 def _parse_time_series(payload: dict) -> pd.DataFrame:
     values = payload.get("values")
@@ -31,21 +36,39 @@ def _parse_time_series(payload: dict) -> pd.DataFrame:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     return frame.dropna(subset=["datetime", "open", "high", "low", "close"]).sort_values("datetime").reset_index(drop=True)
 
+
 def get_market_snapshot(candles: int = 500) -> dict:
     key = _api_key()
     symbol = os.getenv("XAU_SYMBOL", "XAU/USD")
-    params = {"symbol": symbol, "interval": "5min", "outputsize": candles, "apikey": key, "format": "JSON"}
+    cache_seconds = max(0, int(os.getenv("CANDLE_CACHE_SECONDS", "15")))
+    cache_key = (symbol, candles)
+
+    cached = _CACHE.get(cache_key)
+    if cached and time.time() - cached[0] < cache_seconds:
+        return {**cached[1], "cache": "hit"}
+
+    params = {
+        "symbol": symbol,
+        "interval": "5min",
+        "outputsize": min(max(candles, 100), 5000),
+        "apikey": key,
+        "format": "JSON",
+    }
     try:
         response = httpx.get("https://api.twelvedata.com/time_series", params=params, timeout=15)
         response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise MarketDataError(f"Market-data request failed: {exc}") from exc
+
     frame = _parse_time_series(payload)
-    return {
+    snapshot = {
         "symbol": symbol,
         "timeframe": "5m",
         "provider": "twelvedata",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "cache": "miss",
         "candles": frame.to_dict(orient="records"),
     }
+    _CACHE[cache_key] = (time.time(), snapshot)
+    return snapshot
