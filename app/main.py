@@ -33,6 +33,8 @@ class WalkForwardRequest(BaseModel):
     step_bars: int = Field(default=500, ge=50, le=20000)
     thresholds: list[int] = Field(default_factory=lambda: [60, 65, 70, 75, 80])
     horizon: int = Field(default=36, ge=5, le=288)
+    spread: float = Field(default=0.0, ge=0.0)
+    slippage: float = Field(default=0.0, ge=0.0)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,6 +93,8 @@ def walkforward(request: WalkForwardRequest) -> dict:
         step_bars=request.step_bars,
         thresholds=request.thresholds,
         horizon=request.horizon,
+        spread=request.spread,
+        slippage=request.slippage,
     )
 
 
