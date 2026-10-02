@@ -18,7 +18,7 @@ from app.unified_engine import UnifiedEngine
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
-    version="0.3.0",
+    version="0.4.0",
     description="Research-first XAUUSD 5M expansion detection engine.",
 )
 
@@ -53,7 +53,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "service": "xauusd-move-hunter",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "live_trading_enabled": False,
     }
 
@@ -103,6 +103,46 @@ def walkforward(request: WalkForwardRequest) -> dict:
     )
 
 
-@app.get("/api/v1/live")\ndef live(candles: int = 500) -> dict:\n    monitor = LiveMonitor()\n    try:\n        return monitor.update(candles)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n_paper_book = PaperBook()\n_unified_engine = UnifiedEngine(_paper_book)\n\n\n@app.get("/api/v1/unified")\ndef unified(candles: int = 500, auto_paper: bool = False) -> dict:\n    try:\n        return _unified_engine.cycle(candles, auto_paper=auto_paper)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n@app.post("/api/v1/paper/open")\ndef paper_open(setup: dict[str, Any]) -> dict:\n    return _paper_book.open(setup)\n\n\n@app.post("/api/v1/paper/mark")\ndef paper_mark(price: float) -> dict:\n    return {"updates": _paper_book.mark(price)}\n\n\n@app.get("/api/v1/paper")\ndef paper() -> dict:\n    return {"positions": _paper_book.snapshot(), "summary": _paper_book.summary(), "live_trading": False}\n\n\n@app.get("/api/v1/journal")
+@app.get("/api/v1/live")
+def live(candles: int = 500) -> dict:
+    monitor = LiveMonitor()
+    try:
+        return monitor.update(candles)
+    except MarketDataError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+_paper_book = PaperBook()
+_unified_engine = UnifiedEngine(_paper_book)
+
+
+@app.get("/api/v1/unified")
+def unified(candles: int = 500, auto_paper: bool = False) -> dict:
+    try:
+        return _unified_engine.cycle(candles, auto_paper=auto_paper)
+    except MarketDataError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/paper/open")
+def paper_open(setup: dict[str, Any]) -> dict:
+    return _paper_book.open(setup)
+
+
+@app.post("/api/v1/paper/mark")
+def paper_mark(price: float) -> dict:
+    return {"updates": _paper_book.mark(price)}
+
+
+@app.get("/api/v1/paper")
+def paper() -> dict:
+    return {
+        "positions": _paper_book.snapshot(),
+        "summary": _paper_book.summary(),
+        "live_trading": False,
+    }
+
+
+@app.get("/api/v1/journal")
 def journal(limit: int = 100) -> dict:
     return {"setups": read_setups(max(1, min(limit, 500)))}
