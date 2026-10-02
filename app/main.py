@@ -9,6 +9,7 @@ from app.backtest import run_backtest
 from app.journal import read_setups, record_setup
 from app.market_data import MarketDataError, get_market_snapshot
 from app.signal_engine import analyze_market
+from app.walkforward import walk_forward
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
@@ -20,6 +21,15 @@ app = FastAPI(
 class BacktestRequest(BaseModel):
     candles: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
     min_score: int = Field(default=65, ge=40, le=100)
+    horizon: int = Field(default=36, ge=5, le=288)
+
+
+class WalkForwardRequest(BaseModel):
+    candles: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
+    train_bars: int = Field(default=2000, ge=200, le=50000)
+    test_bars: int = Field(default=500, ge=50, le=20000)
+    step_bars: int = Field(default=500, ge=50, le=20000)
+    thresholds: list[int] = Field(default_factory=lambda: [60, 65, 70, 75, 80])
     horizon: int = Field(default=36, ge=5, le=288)
 
 
@@ -64,6 +74,18 @@ def backtest(request: BacktestRequest) -> dict:
     return run_backtest(
         request.candles,
         min_score=request.min_score,
+        horizon=request.horizon,
+    )
+
+
+@app.post("/api/v1/walkforward")
+def walkforward(request: WalkForwardRequest) -> dict:
+    return walk_forward(
+        request.candles,
+        train_bars=request.train_bars,
+        test_bars=request.test_bars,
+        step_bars=request.step_bars,
+        thresholds=request.thresholds,
         horizon=request.horizon,
     )
 
