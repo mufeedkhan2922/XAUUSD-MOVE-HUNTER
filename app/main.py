@@ -6,10 +6,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.backtest import run_backtest
+from app.research import research_report
+from app.adaptive import adaptive_research, failed_setup_analysis
+from app.paper import PaperBook
 from app.journal import read_setups, record_setup
 from app.market_data import MarketDataError, get_market_snapshot
 from app.signal_engine import analyze_market
 from app.walkforward import walk_forward
+from app.live_monitor import LiveMonitor
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
@@ -98,6 +102,6 @@ def walkforward(request: WalkForwardRequest) -> dict:
     )
 
 
-@app.get("/api/v1/journal")
+@app.get("/api/v1/live")\ndef live(candles: int = 500) -> dict:\n    monitor = LiveMonitor()\n    try:\n        return monitor.update(candles)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n_paper_book = PaperBook()\n\n\n@app.post("/api/v1/paper/open")\ndef paper_open(setup: dict[str, Any]) -> dict:\n    return _paper_book.open(setup)\n\n\n@app.post("/api/v1/paper/mark")\ndef paper_mark(price: float) -> dict:\n    return {"updates": _paper_book.mark(price)}\n\n\n@app.get("/api/v1/paper")\ndef paper() -> dict:\n    return {"positions": _paper_book.snapshot(), "live_trading": False}\n\n\n@app.get("/api/v1/journal")
 def journal(limit: int = 100) -> dict:
     return {"setups": read_setups(max(1, min(limit, 500)))}
