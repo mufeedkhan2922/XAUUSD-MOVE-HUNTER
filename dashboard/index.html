@@ -1,57 +1,52 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>XAUUSD MOVE HUNTER</title>
 <style>
-body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f5f6f8;color:#15171a}
-main{max-width:1100px;margin:40px auto;padding:0 20px}
-header{display:flex;justify-content:space-between;align-items:center;gap:20px}
-h1{margin:0}.muted{color:#69707a}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}
-.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;box-shadow:0 2px 8px #0000000a}
-.big{font-size:30px;font-weight:700}.state{font-size:20px;font-weight:700}
-.panel{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:20px;margin-top:14px}
-pre{white-space:pre-wrap;word-break:break-word}
-button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
-@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}
-</style>
-</head>
-<body>
-<main>
-<header>
-<div><h1>XAUUSD MOVE HUNTER</h1><div class="muted">5M expansion detector · paper/research only</div></div>
-<button onclick="loadSignal()">Refresh</button>
-</header>
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f4f6f8;color:#15171a}
+main{max-width:1200px;margin:28px auto;padding:0 18px}header{display:flex;justify-content:space-between;align-items:center;gap:16px}
+h1{margin:0}.muted{color:#68717c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+.card,.panel{background:#fff;border:1px solid #e1e5e9;border-radius:14px;padding:16px;box-shadow:0 2px 8px #0000000a}
+.big{font-size:28px;font-weight:750}.state{font-size:19px;font-weight:750}.panel{margin-top:12px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#eef1f4;font-size:13px}
+pre{white-space:pre-wrap;word-break:break-word;margin:8px 0 0;font-size:13px}button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+.ok{font-weight:650}.err{font-weight:650}
+@media(max-width:800px){.grid,.cols{grid-template-columns:1fr 1fr}}@media(max-width:520px){.grid,.cols{grid-template-columns:1fr}}
+</style></head>
+<body><main>
+<header><div><h1>XAUUSD MOVE HUNTER</h1><div class="muted">5M expansion detector · research / paper only</div></div><div><span id="status" class="pill">connecting…</span> <button onclick="loadSignal()">Refresh</button></div></header>
 <section class="grid">
 <div class="card"><div class="muted">State</div><div id="state" class="state">—</div></div>
 <div class="card"><div class="muted">Score</div><div id="score" class="big">—</div></div>
 <div class="card"><div class="muted">Direction</div><div id="direction" class="big">—</div></div>
 <div class="card"><div class="muted">Move potential</div><div id="potential" class="big">—</div></div>
 </section>
-<div class="panel"><b>Price / Risk</b><pre id="risk">Loading…</pre></div>
+<div class="cols">
+<div class="panel"><b>Trade map</b><pre id="risk">Loading…</pre></div>
+<div class="panel"><b>Expansion sequence</b><pre id="sequence">Loading…</pre></div>
+</div>
+<div class="cols">
 <div class="panel"><b>Reasons</b><pre id="reasons">Loading…</pre></div>
-<div class="panel"><b>Structure / Liquidity</b><pre id="details">Loading…</pre></div>
+<div class="panel"><b>5M / 15M / 1H context</b><pre id="context">Loading…</pre></div>
+</div>
+<div class="panel"><b>Liquidity map</b><pre id="liquidity">Loading…</pre></div>
 </main>
 <script>
+const $=id=>document.getElementById(id);
 async function loadSignal(){
  try{
   const r=await fetch('/api/v1/signal?candles=500');
-  const d=await r.json();
-  if(!r.ok) throw new Error(d.detail||'Request failed');
-  state.textContent=d.state||'—'; score.textContent=d.score??'—';
-  direction.textContent=d.direction||'—';
-  potential.textContent=d.move_potential?.classification||'—';
-  risk.textContent=JSON.stringify({price:d.price,entry:d.entry,invalidation:d.invalidation,targets:d.targets,atr_5m:d.atr_5m},null,2);
-  reasons.textContent=(d.reasons||[]).map((x,i)=>(i+1)+'. '+x).join('\n')||'No confirmed reasons.';
-  details.textContent=JSON.stringify({context:d.context,liquidity:d.liquidity,compression:d.move_potential?.drivers?.compression,expansion:d.move_potential?.drivers?.expansion},null,2);
- }catch(e){
-  state.textContent='DATA ERROR'; reasons.textContent=e.message;
- }
+  const d=await r.json(); if(!r.ok) throw new Error(d.detail||'Market data unavailable');
+  $('status').textContent='LIVE DATA'; $('status').className='pill ok';
+  $('state').textContent=d.state||'—'; $('score').textContent=d.score??'—'; $('direction').textContent=d.direction||'—';
+  const mp=d.move_potential||{}; $('potential').textContent=mp.classification||'—';
+  $('risk').textContent=JSON.stringify({price:d.price,entry:d.entry,invalidation:d.invalidation,targets:d.targets,atr_5m:d.atr_5m},null,2);
+  $('sequence').textContent=JSON.stringify(d.sequence||{},null,2);
+  $('reasons').textContent=(d.reasons||[]).map((x,i)=>(i+1)+'. '+x).join('\n')||'No confirmed setup.';
+  $('context').textContent=JSON.stringify(d.context||{},null,2);
+  $('liquidity').textContent=JSON.stringify({levels:d.liquidity?.levels,equal_high:d.liquidity?.equal_high,equal_low:d.liquidity?.equal_low,sweep_high:d.liquidity?.sweep_high,sweep_low:d.liquidity?.sweep_low,session_sweeps:d.liquidity?.session_sweeps},null,2);
+ }catch(e){$('status').textContent='DATA ERROR';$('status').className='pill err';$('state').textContent='NO DATA';$('reasons').textContent=e.message}
 }
-loadSignal();
-setInterval(loadSignal,15000);
-</script>
-</body>
-</html>
+loadSignal(); setInterval(loadSignal,15000);
+</script></body></html>
