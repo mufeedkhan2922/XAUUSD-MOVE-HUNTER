@@ -22,6 +22,8 @@ class BacktestRequest(BaseModel):
     candles: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
     min_score: int = Field(default=65, ge=40, le=100)
     horizon: int = Field(default=36, ge=5, le=288)
+    spread: float = Field(default=0.0, ge=0.0)
+    slippage: float = Field(default=0.0, ge=0.0)
 
 
 class WalkForwardRequest(BaseModel):
@@ -75,6 +77,8 @@ def backtest(request: BacktestRequest) -> dict:
         request.candles,
         min_score=request.min_score,
         horizon=request.horizon,
+        spread=request.spread,
+        slippage=request.slippage,
     )
 
 
