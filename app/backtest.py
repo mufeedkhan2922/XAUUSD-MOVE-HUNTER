@@ -159,9 +159,6 @@ def _simulate_trade(
     t1_exit = t1_trigger - sign * exit_cost
     t2_exit = t2_trigger - sign * exit_cost
     t3_exit = t3_trigger - sign * exit_cost
-    if risk <= 0:
-        raise ValueError("Invalid zero-risk trade.")
-
     trade = Trade(
         direction, signal_index, signal_index, entry, stop_trigger, t1_trigger, t2_trigger, t3_trigger,
         int(setup["score"]), list(setup["reasons"])
@@ -170,8 +167,10 @@ def _simulate_trade(
 
     for j in range(signal_index + 1, end):
         bar = frame.iloc[j]
-        favourable = (float(bar.high) - entry) * sign
-        adverse = (float(bar.low) - entry) * sign
+        bar_high = float(bar.high)
+        bar_low = float(bar.low)
+        favourable = (bar_high - entry) if direction == "BULLISH" else (entry - bar_low)
+        adverse = (bar_low - entry) if direction == "BULLISH" else (entry - bar_high)
         trade.mfe_r = max(trade.mfe_r, favourable / risk)
         trade.mae_r = min(trade.mae_r, adverse / risk)
 
