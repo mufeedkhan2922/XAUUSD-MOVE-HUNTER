@@ -1,17 +1,26 @@
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
+from app.backtest import run_backtest
 from app.journal import read_setups, record_setup
 from app.market_data import MarketDataError, get_market_snapshot
 from app.signal_engine import analyze_market
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
-    version="0.2.0",
+    version="0.3.0",
     description="Research-first XAUUSD 5M expansion detection engine.",
 )
+
+
+class BacktestRequest(BaseModel):
+    candles: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
+    min_score: int = Field(default=65, ge=40, le=100)
+    horizon: int = Field(default=36, ge=5, le=288)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -25,6 +34,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "service": "xauusd-move-hunter",
+        "version": "0.3.0",
         "live_trading_enabled": False,
     }
 
@@ -47,6 +57,15 @@ def signal(candles: int = 500, journal: bool = False) -> dict:
     if journal:
         record_setup(result)
     return result
+
+
+@app.post("/api/v1/backtest")
+def backtest(request: BacktestRequest) -> dict:
+    return run_backtest(
+        request.candles,
+        min_score=request.min_score,
+        horizon=request.horizon,
+    )
 
 
 @app.get("/api/v1/journal")
