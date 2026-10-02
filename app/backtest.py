@@ -155,15 +155,15 @@ def _simulate_trade(
 
     # Executed exit prices include adverse friction. The trigger remains the
     # strategy level used to decide whether the bar touched stop/target.
-    stop = stop_trigger - sign * exit_cost
-    t1 = t1_trigger - sign * exit_cost
-    t2 = t2_trigger - sign * exit_cost
-    t3 = t3_trigger - sign * exit_cost
+    stop_exit = stop_trigger - sign * exit_cost
+    t1_exit = t1_trigger - sign * exit_cost
+    t2_exit = t2_trigger - sign * exit_cost
+    t3_exit = t3_trigger - sign * exit_cost
     if risk <= 0:
         raise ValueError("Invalid zero-risk trade.")
 
     trade = Trade(
-        direction, signal_index, signal_index, entry, stop, t1, t2, t3,
+        direction, signal_index, signal_index, entry, stop_trigger, t1_trigger, t2_trigger, t3_trigger,
         int(setup["score"]), list(setup["reasons"])
     )
     end = min(len(frame), signal_index + 1 + horizon)
@@ -183,20 +183,20 @@ def _simulate_trade(
         # With OHLC alone the intrabar path is unknowable. Stop-first is the
         # conservative assumption when stop and target are both touched.
         if stop_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, stop, "LOSS"
+            trade.exit_index, trade.exit_price, trade.outcome = j, stop_exit, "LOSS"
             return trade
         if t3_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t3, "WIN_3R"
+            trade.exit_index, trade.exit_price, trade.outcome = j, t3_exit, "WIN_3R"
             return trade
         if t2_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t2, "WIN_2R"
+            trade.exit_index, trade.exit_price, trade.outcome = j, t2_exit, "WIN_2R"
             return trade
         if t1_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t1, "WIN_1R"
+            trade.exit_index, trade.exit_price, trade.outcome = j, t1_exit, "WIN_1R"
             return trade
 
     trade.exit_index = end - 1 if end > signal_index + 1 else signal_index
-    trade.exit_price = float(frame.iloc[trade.exit_index].close)
+    trade.exit_price = float(frame.iloc[trade.exit_index].close) - sign * exit_cost
     pnl_r = ((trade.exit_price - entry) * sign) / risk
     trade.outcome = "TIMEOUT_WIN" if pnl_r > 0 else "TIMEOUT_LOSS"
     return trade
@@ -297,7 +297,7 @@ def run_backtest(
             "spread": spread,
             "slippage": slippage,
             "by_direction": by_direction,
-            "note": "Deterministic OHLC research backtest. Same-bar stop/target conflicts use stop-first ordering; spread/slippage are explicit price-unit inputs.",
+            "note": "Deterministic OHLC research backtest. Trigger levels are kept separate from execution prices; entry/exit friction is modeled explicitly. Same-bar stop/target conflicts use stop-first ordering."
         },
         "trades": [
             {
