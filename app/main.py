@@ -14,6 +14,7 @@ from app.market_data import MarketDataError, get_market_snapshot
 from app.signal_engine import analyze_market
 from app.walkforward import walk_forward
 from app.live_monitor import LiveMonitor
+from app.unified_engine import UnifiedEngine
 
 app = FastAPI(
     title="XAUUSD MOVE HUNTER",
@@ -102,6 +103,6 @@ def walkforward(request: WalkForwardRequest) -> dict:
     )
 
 
-@app.get("/api/v1/live")\ndef live(candles: int = 500) -> dict:\n    monitor = LiveMonitor()\n    try:\n        return monitor.update(candles)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n_paper_book = PaperBook()\n\n\n@app.post("/api/v1/paper/open")\ndef paper_open(setup: dict[str, Any]) -> dict:\n    return _paper_book.open(setup)\n\n\n@app.post("/api/v1/paper/mark")\ndef paper_mark(price: float) -> dict:\n    return {"updates": _paper_book.mark(price)}\n\n\n@app.get("/api/v1/paper")\ndef paper() -> dict:\n    return {"positions": _paper_book.snapshot(), "summary": _paper_book.summary(), "live_trading": False}\n\n\n@app.get("/api/v1/journal")
+@app.get("/api/v1/live")\ndef live(candles: int = 500) -> dict:\n    monitor = LiveMonitor()\n    try:\n        return monitor.update(candles)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n_paper_book = PaperBook()\n_unified_engine = UnifiedEngine(_paper_book)\n\n\n@app.get("/api/v1/unified")\ndef unified(candles: int = 500, auto_paper: bool = False) -> dict:\n    try:\n        return _unified_engine.cycle(candles, auto_paper=auto_paper)\n    except MarketDataError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\n@app.post("/api/v1/paper/open")\ndef paper_open(setup: dict[str, Any]) -> dict:\n    return _paper_book.open(setup)\n\n\n@app.post("/api/v1/paper/mark")\ndef paper_mark(price: float) -> dict:\n    return {"updates": _paper_book.mark(price)}\n\n\n@app.get("/api/v1/paper")\ndef paper() -> dict:\n    return {"positions": _paper_book.snapshot(), "summary": _paper_book.summary(), "live_trading": False}\n\n\n@app.get("/api/v1/journal")
 def journal(limit: int = 100) -> dict:
     return {"setups": read_setups(max(1, min(limit, 500)))}
