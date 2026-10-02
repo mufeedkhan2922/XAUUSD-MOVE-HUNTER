@@ -284,7 +284,15 @@ def _move_potential(frame: pd.DataFrame, direction: str, score: int,
 def analyze_market(snapshot: dict[str, Any]) -> dict[str, Any]:
     frame = pd.DataFrame(snapshot.get("candles", []))
     if frame.empty:
-        return {"state": "NO TRADE", "score": 0, "reason": "No candles available.", "live_trading": False}
+        return {
+            "state": "NO TRADE", "score": 0, "direction": "UNKNOWN",
+            "price": None, "atr_5m": None, "entry": None,
+            "invalidation": None, "targets": [],
+            "move_potential": {"classification": "LOW", "estimated_atr_multiple": 0.0, "drivers": []},
+            "sequence": {}, "context": {}, "liquidity": {}, "structure": {},
+            "fair_value_gaps": [], "order_blocks": [],
+            "reasons": ["No candles available."], "live_trading": False,
+        }
 
     frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True)
     for col in ("open", "high", "low", "close"):
