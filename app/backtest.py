@@ -254,60 +254,7 @@ def run_backtest(
             "trades": [],
         }
 
-    # Aggregate realized P&L from the partial target ladder.\n    r_results: list[float] = [float(t.realized_r) for t in trades]\n\n    wins = [x for x in r_results if x > 0]
-    losses = [x for x in r_results if x <= 0]
-    curve = np.cumsum(r_results)
-    running_max = np.maximum.accumulate(curve)
-    drawdown = curve - running_max
-
-    by_direction: dict[str, dict[str, float]] = {}
-    for direction in ("BULLISH", "BEARISH"):
-        vals = [r for r, t in zip(r_results, trades) if t.direction == direction]
-        by_direction[direction] = {
-            "trades": len(vals),
-            "win_rate_pct": round(100 * sum(v > 0 for v in vals) / len(vals), 2) if vals else 0.0,
-            "net_r": round(float(sum(vals)), 3),
-        }
-
-    return {
-        "summary": {
-            "trades": len(trades),
-            "wins": len(wins),
-            "losses": len(losses),
-            "win_rate_pct": round(100 * len(wins) / len(trades), 2),
-            "net_r": round(float(sum(r_results)), 3),
-            "expectancy_r": round(float(np.mean(r_results)), 3),
-            "profit_factor": round(float(sum(wins) / abs(sum(losses))), 3) if losses else None,
-            "max_drawdown_r": round(float(abs(drawdown.min())), 3),
-            "average_mfe_r": round(float(np.mean([t.mfe_r for t in trades])), 3),
-            "average_mae_r": round(float(np.mean([t.mae_r for t in trades])), 3),
-            "threshold": min_score,
-            "horizon_bars": horizon,
-            "spread": spread,
-            "slippage": slippage,
-            "allow_overlap": allow_overlap,
-            "by_direction": by_direction,
-            "note": "Deterministic OHLC research backtest. Trigger levels are kept separate from execution prices; entry/exit friction is modeled explicitly. Targets use a 50/30/20% partial-exit ladder with breakeven protection after T1. Same-bar stop/target conflicts use stop-first ordering."
-        },
-        "trades": [
-            {
-                "direction": t.direction,
-                "score": t.score,
-                "reasons": t.reasons,
-                "signal_index": t.signal_index,
-                "entry": t.entry,
-                "stop": t.stop,
-                "targets": [t.target_1, t.target_2, t.target_3],
-                "exit_index": t.exit_index,
-                "exit_price": t.exit_price,
-                "outcome": t.outcome,
-                "mfe_r": round(t.mfe_r, 3),
-                "mae_r": round(t.mae_r, 3),
-                "realized_r": round(t.realized_r, 3),
-            }
-            for t in trades
-        ],
-    }    # Aggregate realized P&L from the partial target ladder.
+    # Aggregate realized P&L from the partial target ladder.
     r_results: list[float] = [float(t.realized_r) for t in trades]
 
     wins = [x for x in r_results if x > 0]
