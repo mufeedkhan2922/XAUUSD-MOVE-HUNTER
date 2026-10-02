@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.market_features import add_indicators, compression_state, detect_fvg, detect_order_blocks, session_liquidity
+from app.market_features import add_indicators, compression_state, detect_fvg, detect_order_blocks
 
 
 @dataclass
@@ -19,6 +19,8 @@ class Trade:
     target_1: float
     target_2: float
     target_3: float
+    score: int
+    reasons: list[str]
     exit_index: int | None = None
     exit_price: float | None = None
     outcome: str = "OPEN"
@@ -27,14 +29,13 @@ class Trade:
 
 
 def _context(frame: pd.DataFrame) -> dict[str, str]:
-    result = {}
+    result: dict[str, str] = {}
+    indexed = frame.set_index("datetime")
     for rule, label in (("15min", "15m"), ("1h", "1h")):
-        bars = (
-            frame.set_index("datetime")
-            .resample(rule)
-            .agg(open=("open","first"), high=("high","max"), low=("low","min"), close=("close","last"))
-            .dropna()
-        )
+        bars = indexed.resample(rule).agg(
+            open=("open", "first"), high=("high", "max"),
+            low=("low", "min"), close=("close", "last")
+        ).dropna()
         if len(bars) < 30:
             result[label] = "UNKNOWN"
             continue
@@ -47,8 +48,7 @@ def _context(frame: pd.DataFrame) -> dict[str, str]:
 def _signal_at(frame: pd.DataFrame, i: int) -> dict[str, Any] | None:
     if i < 60:
         return None
-    history = frame.iloc[: i + 1].copy()
-    history = add_indicators(history)
+    history = add_indicators(frame.iloc[: i + 1].copy())
     current = history.iloc[-1]
     previous = history.iloc[-6:-1]
     atr = float(current.atr) if not np.isnan(float(current.atr)) else 0.0
@@ -110,6 +110,8 @@ def _signal_at(frame: pd.DataFrame, i: int) -> dict[str, Any] | None:
         return None
 
     entry = float(current.close)
+    # Volatility-aware initial risk. The minimum prevents unrealistically tiny
+    # stops on very quiet synthetic/illiquid data.
     risk = max(0.8 * atr, 0.5)
     stop = entry - risk if direction == "BULLISH" else entry + risk
     sign = 1 if direction == "BULLISH" else -1
@@ -124,14 +126,29 @@ def _signal_at(frame: pd.DataFrame, i: int) -> dict[str, Any] | None:
     }
 
 
-def _simulate_trade(frame: pd.DataFrame, signal_index: int, setup: dict[str, Any], horizon: int) -> Trade:
+def _simulate_trade(
+    frame: pd.DataFrame,
+    signal_index: int,
+    setup: dict[str, Any],
+    horizon: int,
+    spread: float,
+    slippage: float,
+) -> Trade:
     direction = setup["direction"]
-    entry = setup["entry"]
-    stop = setup["stop"]
-    t1, t2, t3 = setup["targets"]
-    risk = abs(entry - stop)
     sign = 1 if direction == "BULLISH" else -1
-    trade = Trade(direction, signal_index, signal_index, entry, stop, t1, t2, t3)
+    # Costs are represented in price units and charged once for the round trip.
+    # Keeping them explicit avoids pretending that OHLC backtests have zero friction.
+    entry = float(setup["entry"]) + sign * (spread / 2 + slippage)
+    stop = float(setup["stop"]) + sign * (spread / 2 + slippage)
+    t1, t2, t3 = [float(x) + sign * (spread / 2 + slippage) for x in setup["targets"]]
+    risk = abs(entry - stop)
+    if risk <= 0:
+        raise ValueError("Invalid zero-risk trade.")
+
+    trade = Trade(
+        direction, signal_index, signal_index, entry, stop, t1, t2, t3,
+        int(setup["score"]), list(setup["reasons"])
+    )
     end = min(len(frame), signal_index + 1 + horizon)
 
     for j in range(signal_index + 1, end):
@@ -146,7 +163,8 @@ def _simulate_trade(frame: pd.DataFrame, signal_index: int, setup: dict[str, Any
         t2_hit = float(bar.high) >= t2 if direction == "BULLISH" else float(bar.low) <= t2
         t1_hit = float(bar.high) >= t1 if direction == "BULLISH" else float(bar.low) <= t1
 
-        # Conservative ordering when both stop and target are touched in one OHLC bar.
+        # With OHLC alone the intrabar path is unknowable. Stop-first is the
+        # conservative assumption when stop and target are both touched.
         if stop_hit:
             trade.exit_index, trade.exit_price, trade.outcome = j, stop, "LOSS"
             return trade
@@ -167,15 +185,26 @@ def _simulate_trade(frame: pd.DataFrame, signal_index: int, setup: dict[str, Any
     return trade
 
 
-def run_backtest(candles: list[dict[str, Any]], min_score: int = 65, horizon: int = 36) -> dict[str, Any]:
+def run_backtest(
+    candles: list[dict[str, Any]],
+    min_score: int = 65,
+    horizon: int = 36,
+    spread: float = 0.0,
+    slippage: float = 0.0,
+) -> dict[str, Any]:
+    if spread < 0 or slippage < 0:
+        raise ValueError("spread and slippage must be non-negative.")
+
     frame = pd.DataFrame(candles)
     if frame.empty:
         return {"error": "No candles supplied.", "trades": []}
 
     frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True)
-    for col in ("open","high","low","close"):
+    for col in ("open", "high", "low", "close"):
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    frame = frame.dropna(subset=["datetime","open","high","low","close"]).sort_values("datetime").reset_index(drop=True)
+    frame = frame.dropna(
+        subset=["datetime", "open", "high", "low", "close"]
+    ).sort_values("datetime").reset_index(drop=True)
 
     trades: list[Trade] = []
     cooldown_until = -1
@@ -185,17 +214,23 @@ def run_backtest(candles: list[dict[str, Any]], min_score: int = 65, horizon: in
         setup = _signal_at(frame, i)
         if not setup or setup["score"] < min_score:
             continue
-        trade = _simulate_trade(frame, i, setup, horizon)
+        trade = _simulate_trade(frame, i, setup, horizon, spread, slippage)
         trades.append(trade)
         cooldown_until = i + 3
 
     if not trades:
         return {
-            "summary": {"trades": 0, "message": "No setups met the selected threshold."},
+            "summary": {
+                "trades": 0,
+                "message": "No setups met the selected threshold.",
+                "threshold": min_score,
+                "spread": spread,
+                "slippage": slippage,
+            },
             "trades": [],
         }
 
-    r_results = []
+    r_results: list[float] = []
     for t in trades:
         if t.outcome == "LOSS":
             r_results.append(-1.0)
@@ -206,7 +241,11 @@ def run_backtest(candles: list[dict[str, Any]], min_score: int = 65, horizon: in
         elif t.outcome == "WIN_1R":
             r_results.append(1.0)
         else:
-            pnl = ((t.exit_price - t.entry) * (1 if t.direction == "BULLISH" else -1)) / abs(t.entry - t.stop)
+            pnl = (
+                (t.exit_price - t.entry)
+                * (1 if t.direction == "BULLISH" else -1)
+                / abs(t.entry - t.stop)
+            )
             r_results.append(float(pnl))
 
     wins = [x for x in r_results if x > 0]
@@ -214,6 +253,15 @@ def run_backtest(candles: list[dict[str, Any]], min_score: int = 65, horizon: in
     curve = np.cumsum(r_results)
     running_max = np.maximum.accumulate(curve)
     drawdown = curve - running_max
+
+    by_direction: dict[str, dict[str, float]] = {}
+    for direction in ("BULLISH", "BEARISH"):
+        vals = [r for r, t in zip(r_results, trades) if t.direction == direction]
+        by_direction[direction] = {
+            "trades": len(vals),
+            "win_rate_pct": round(100 * sum(v > 0 for v in vals) / len(vals), 2) if vals else 0.0,
+            "net_r": round(float(sum(vals)), 3),
+        }
 
     return {
         "summary": {
@@ -229,11 +277,16 @@ def run_backtest(candles: list[dict[str, Any]], min_score: int = 65, horizon: in
             "average_mae_r": round(float(np.mean([t.mae_r for t in trades])), 3),
             "threshold": min_score,
             "horizon_bars": horizon,
-            "note": "Backtest is deterministic and uses candle OHLC. Same-bar stop/target conflicts are resolved conservatively in favour of the stop.",
+            "spread": spread,
+            "slippage": slippage,
+            "by_direction": by_direction,
+            "note": "Deterministic OHLC research backtest. Same-bar stop/target conflicts use stop-first ordering; spread/slippage are explicit price-unit inputs.",
         },
         "trades": [
             {
                 "direction": t.direction,
+                "score": t.score,
+                "reasons": t.reasons,
                 "signal_index": t.signal_index,
                 "entry": t.entry,
                 "stop": t.stop,
