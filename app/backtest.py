@@ -26,6 +26,7 @@ class Trade:
     outcome: str = "OPEN"
     mfe_r: float = 0.0
     mae_r: float = 0.0
+    realized_r: float = 0.0
 
 
 def _context(frame: pd.DataFrame) -> dict[str, str]:
@@ -136,68 +137,69 @@ def _simulate_trade(
 ) -> Trade:
     direction = setup["direction"]
     sign = 1 if direction == "BULLISH" else -1
-    # Model execution friction without moving the trigger levels themselves.
-    # Entry is filled adversely; exits are filled adversely for the trader too.
-    # This is still an OHLC approximation, but it avoids the earlier mistake of
-    # shifting entry, stop, and targets by the same amount.
-    half_spread = spread / 2.0
-    entry_cost = half_spread + slippage
-    exit_cost = half_spread + slippage
-    raw_entry = float(setup["entry"])
-    raw_stop = float(setup["stop"])
-    raw_t1, raw_t2, raw_t3 = [float(x) for x in setup["targets"]]
-    entry = raw_entry + sign * entry_cost
-    stop_trigger = raw_stop
-    t1_trigger, t2_trigger, t3_trigger = raw_t1, raw_t2, raw_t3
-    risk = abs(entry - stop_trigger)
+    friction = spread / 2.0 + slippage
+    entry = float(setup["entry"]) + sign * friction
+    stop = float(setup["stop"])
+    targets = tuple(float(x) for x in setup["targets"])
+    risk = abs(entry - stop)
     if risk <= 0:
         raise ValueError("Invalid zero-risk trade.")
 
-    # Executed exit prices include adverse friction. The trigger remains the
-    # strategy level used to decide whether the bar touched stop/target.
-    stop_exit = stop_trigger - sign * exit_cost
-    t1_exit = t1_trigger - sign * exit_cost
-    t2_exit = t2_trigger - sign * exit_cost
-    t3_exit = t3_trigger - sign * exit_cost
+    # Partial ladder: 50% at T1, 30% at T2, 20% at T3.
+    weights = (0.50, 0.30, 0.20)
+    hit = [False, False, False]
+    remaining = 1.0
+    active_stop = stop
     trade = Trade(
-        direction, signal_index, signal_index, entry, stop_trigger, t1_trigger, t2_trigger, t3_trigger,
-        int(setup["score"]), list(setup["reasons"])
+        direction, signal_index, signal_index, entry, stop,
+        targets[0], targets[1], targets[2], int(setup["score"]), list(setup["reasons"])
     )
     end = min(len(frame), signal_index + 1 + horizon)
 
+    def execute(trigger: float, fraction: float) -> float:
+        exit_price = trigger - sign * friction
+        return ((exit_price - entry) * sign / risk) * fraction
+
     for j in range(signal_index + 1, end):
         bar = frame.iloc[j]
-        bar_high = float(bar.high)
-        bar_low = float(bar.low)
-        favourable = (bar_high - entry) if direction == "BULLISH" else (entry - bar_low)
-        adverse = (bar_low - entry) if direction == "BULLISH" else (entry - bar_high)
+        high, low = float(bar.high), float(bar.low)
+        favourable = high - entry if direction == "BULLISH" else entry - low
+        adverse = low - entry if direction == "BULLISH" else entry - high
         trade.mfe_r = max(trade.mfe_r, favourable / risk)
         trade.mae_r = min(trade.mae_r, adverse / risk)
 
-        stop_hit = float(bar.low) <= stop_trigger if direction == "BULLISH" else float(bar.high) >= stop_trigger
-        t3_hit = float(bar.high) >= t3_trigger if direction == "BULLISH" else float(bar.low) <= t3_trigger
-        t2_hit = float(bar.high) >= t2_trigger if direction == "BULLISH" else float(bar.low) <= t2_trigger
-        t1_hit = float(bar.high) >= t1_trigger if direction == "BULLISH" else float(bar.low) <= t1_trigger
+        stop_hit = low <= active_stop if direction == "BULLISH" else high >= active_stop
+        target_hits = [
+            (not hit[k]) and (high >= targets[k] if direction == "BULLISH" else low <= targets[k])
+            for k in range(3)
+        ]
 
-        # With OHLC alone the intrabar path is unknowable. Stop-first is the
-        # conservative assumption when stop and target are both touched.
+        # OHLC cannot reveal intrabar order, so stop-first is conservative.
         if stop_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, stop_exit, "LOSS"
+            trade.realized_r += execute(active_stop, remaining)
+            trade.exit_index, trade.exit_price = j, active_stop - sign * friction
+            trade.outcome = "LOSS" if trade.realized_r <= 0 else "PARTIAL_WIN"
             return trade
-        if t3_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t3_exit, "WIN_3R"
-            return trade
-        if t2_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t2_exit, "WIN_2R"
-            return trade
-        if t1_hit:
-            trade.exit_index, trade.exit_price, trade.outcome = j, t1_exit, "WIN_1R"
-            return trade
+
+        for k, touched in enumerate(target_hits):
+            if not touched:
+                continue
+            fraction = min(weights[k], remaining)
+            trade.realized_r += execute(targets[k], fraction)
+            hit[k] = True
+            remaining -= fraction
+            if k == 0:
+                active_stop = entry
+            if remaining <= 1e-9:
+                trade.exit_index, trade.exit_price = j, targets[k] - sign * friction
+                trade.outcome = "WIN_3R" if k == 2 else "WIN_2R" if k == 1 else "WIN_1R"
+                return trade
 
     trade.exit_index = end - 1 if end > signal_index + 1 else signal_index
-    trade.exit_price = float(frame.iloc[trade.exit_index].close) - sign * exit_cost
-    pnl_r = ((trade.exit_price - entry) * sign) / risk
-    trade.outcome = "TIMEOUT_WIN" if pnl_r > 0 else "TIMEOUT_LOSS"
+    close = float(frame.iloc[trade.exit_index].close)
+    trade.exit_price = close - sign * friction
+    trade.realized_r += execute(close, remaining)
+    trade.outcome = "TIMEOUT_WIN" if trade.realized_r > 0 else "TIMEOUT_LOSS"
     return trade
 
 
@@ -246,25 +248,7 @@ def run_backtest(
             "trades": [],
         }
 
-    r_results: list[float] = []
-    for t in trades:
-        if t.outcome == "LOSS":
-            r_results.append(-1.0)
-        elif t.outcome == "WIN_3R":
-            r_results.append(3.0)
-        elif t.outcome == "WIN_2R":
-            r_results.append(2.0)
-        elif t.outcome == "WIN_1R":
-            r_results.append(1.0)
-        else:
-            pnl = (
-                (t.exit_price - t.entry)
-                * (1 if t.direction == "BULLISH" else -1)
-                / abs(t.entry - t.stop)
-            )
-            r_results.append(float(pnl))
-
-    wins = [x for x in r_results if x > 0]
+    # Aggregate realized P&L from the partial target ladder.\n    r_results: list[float] = [float(t.realized_r) for t in trades]\n\n    wins = [x for x in r_results if x > 0]
     losses = [x for x in r_results if x <= 0]
     curve = np.cumsum(r_results)
     running_max = np.maximum.accumulate(curve)
@@ -296,7 +280,7 @@ def run_backtest(
             "spread": spread,
             "slippage": slippage,
             "by_direction": by_direction,
-            "note": "Deterministic OHLC research backtest. Trigger levels are kept separate from execution prices; entry/exit friction is modeled explicitly. Same-bar stop/target conflicts use stop-first ordering."
+            "note": "Deterministic OHLC research backtest. Trigger levels are kept separate from execution prices; entry/exit friction is modeled explicitly. Targets use a 50/30/20% partial-exit ladder with breakeven protection after T1. Same-bar stop/target conflicts use stop-first ordering."
         },
         "trades": [
             {
@@ -312,6 +296,7 @@ def run_backtest(
                 "outcome": t.outcome,
                 "mfe_r": round(t.mfe_r, 3),
                 "mae_r": round(t.mae_r, 3),
+                "realized_r": round(t.realized_r, 3),
             }
             for t in trades
         ],
