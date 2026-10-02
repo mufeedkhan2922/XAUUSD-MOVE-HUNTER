@@ -27,3 +27,5 @@ def test_walkforward_schema():
     result = walk_forward(make_candles(), train_bars=400, test_bars=150, step_bars=150)
     assert "summary" in result
     assert "windows" in result
+    assert "research_quality" in result["summary"]
+    assert "threshold_stability" in result["summary"]
