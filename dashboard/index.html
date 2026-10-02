@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XAUUSD MOVE HUNTER</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f5f6f8;color:#15171a}
+main{max-width:1100px;margin:40px auto;padding:0 20px}
+header{display:flex;justify-content:space-between;align-items:center;gap:20px}
+h1{margin:0}.muted{color:#69707a}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}
+.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;box-shadow:0 2px 8px #0000000a}
+.big{font-size:30px;font-weight:700}.state{font-size:20px;font-weight:700}
+.panel{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:20px;margin-top:14px}
+pre{white-space:pre-wrap;word-break:break-word}
+button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div><h1>XAUUSD MOVE HUNTER</h1><div class="muted">5M expansion detector · paper/research only</div></div>
+<button onclick="loadSignal()">Refresh</button>
+</header>
+<section class="grid">
+<div class="card"><div class="muted">State</div><div id="state" class="state">—</div></div>
+<div class="card"><div class="muted">Score</div><div id="score" class="big">—</div></div>
+<div class="card"><div class="muted">Direction</div><div id="direction" class="big">—</div></div>
+<div class="card"><div class="muted">Move potential</div><div id="potential" class="big">—</div></div>
+</section>
+<div class="panel"><b>Price / Risk</b><pre id="risk">Loading…</pre></div>
+<div class="panel"><b>Reasons</b><pre id="reasons">Loading…</pre></div>
+<div class="panel"><b>Structure / Liquidity</b><pre id="details">Loading…</pre></div>
+</main>
+<script>
+async function loadSignal(){
+ try{
+  const r=await fetch('/api/v1/signal?candles=500');
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.detail||'Request failed');
+  state.textContent=d.state||'—'; score.textContent=d.score??'—';
+  direction.textContent=d.direction||'—';
+  potential.textContent=d.move_potential?.classification||'—';
+  risk.textContent=JSON.stringify({price:d.price,entry:d.entry,invalidation:d.invalidation,targets:d.targets,atr_5m:d.atr_5m},null,2);
+  reasons.textContent=(d.reasons||[]).map((x,i)=>(i+1)+'. '+x).join('\n')||'No confirmed reasons.';
+  details.textContent=JSON.stringify({context:d.context,liquidity:d.liquidity,compression:d.move_potential?.drivers?.compression,expansion:d.move_potential?.drivers?.expansion},null,2);
+ }catch(e){
+  state.textContent='DATA ERROR'; reasons.textContent=e.message;
+ }
+}
+loadSignal();
+setInterval(loadSignal,15000);
+</script>
+</body>
+</html>
