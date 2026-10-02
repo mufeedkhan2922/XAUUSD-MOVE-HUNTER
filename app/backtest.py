@@ -136,12 +136,29 @@ def _simulate_trade(
 ) -> Trade:
     direction = setup["direction"]
     sign = 1 if direction == "BULLISH" else -1
-    # Costs are represented in price units and charged once for the round trip.
-    # Keeping them explicit avoids pretending that OHLC backtests have zero friction.
-    entry = float(setup["entry"]) + sign * (spread / 2 + slippage)
-    stop = float(setup["stop"]) + sign * (spread / 2 + slippage)
-    t1, t2, t3 = [float(x) + sign * (spread / 2 + slippage) for x in setup["targets"]]
-    risk = abs(entry - stop)
+    # Model execution friction without moving the trigger levels themselves.
+    # Entry is filled adversely; exits are filled adversely for the trader too.
+    # This is still an OHLC approximation, but it avoids the earlier mistake of
+    # shifting entry, stop, and targets by the same amount.
+    half_spread = spread / 2.0
+    entry_cost = half_spread + slippage
+    exit_cost = half_spread + slippage
+    raw_entry = float(setup["entry"])
+    raw_stop = float(setup["stop"])
+    raw_t1, raw_t2, raw_t3 = [float(x) for x in setup["targets"]]
+    entry = raw_entry + sign * entry_cost
+    stop_trigger = raw_stop
+    t1_trigger, t2_trigger, t3_trigger = raw_t1, raw_t2, raw_t3
+    risk = abs(entry - stop_trigger)
+    if risk <= 0:
+        raise ValueError("Invalid zero-risk trade.")
+
+    # Executed exit prices include adverse friction. The trigger remains the
+    # strategy level used to decide whether the bar touched stop/target.
+    stop = stop_trigger - sign * exit_cost
+    t1 = t1_trigger - sign * exit_cost
+    t2 = t2_trigger - sign * exit_cost
+    t3 = t3_trigger - sign * exit_cost
     if risk <= 0:
         raise ValueError("Invalid zero-risk trade.")
 
@@ -158,10 +175,10 @@ def _simulate_trade(
         trade.mfe_r = max(trade.mfe_r, favourable / risk)
         trade.mae_r = min(trade.mae_r, adverse / risk)
 
-        stop_hit = float(bar.low) <= stop if direction == "BULLISH" else float(bar.high) >= stop
-        t3_hit = float(bar.high) >= t3 if direction == "BULLISH" else float(bar.low) <= t3
-        t2_hit = float(bar.high) >= t2 if direction == "BULLISH" else float(bar.low) <= t2
-        t1_hit = float(bar.high) >= t1 if direction == "BULLISH" else float(bar.low) <= t1
+        stop_hit = float(bar.low) <= stop_trigger if direction == "BULLISH" else float(bar.high) >= stop_trigger
+        t3_hit = float(bar.high) >= t3_trigger if direction == "BULLISH" else float(bar.low) <= t3_trigger
+        t2_hit = float(bar.high) >= t2_trigger if direction == "BULLISH" else float(bar.low) <= t2_trigger
+        t1_hit = float(bar.high) >= t1_trigger if direction == "BULLISH" else float(bar.low) <= t1_trigger
 
         # With OHLC alone the intrabar path is unknowable. Stop-first is the
         # conservative assumption when stop and target are both touched.
