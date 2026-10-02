@@ -209,6 +209,7 @@ def run_backtest(
     horizon: int = 36,
     spread: float = 0.0,
     slippage: float = 0.0,
+    allow_overlap: bool = False,
 ) -> dict[str, Any]:
     if spread < 0 or slippage < 0:
         raise ValueError("spread and slippage must be non-negative.")
@@ -226,8 +227,11 @@ def run_backtest(
 
     trades: list[Trade] = []
     cooldown_until = -1
+    active_until = -1
     for i in range(60, len(frame) - 2):
         if i <= cooldown_until:
+            continue
+        if not allow_overlap and i <= active_until:
             continue
         setup = _signal_at(frame, i)
         if not setup or setup["score"] < min_score:
@@ -235,6 +239,7 @@ def run_backtest(
         trade = _simulate_trade(frame, i, setup, horizon, spread, slippage)
         trades.append(trade)
         cooldown_until = i + 3
+        active_until = trade.exit_index if trade.exit_index is not None else i
 
     if not trades:
         return {
@@ -244,6 +249,7 @@ def run_backtest(
                 "threshold": min_score,
                 "spread": spread,
                 "slippage": slippage,
+                "allow_overlap": allow_overlap,
             },
             "trades": [],
         }
@@ -279,6 +285,7 @@ def run_backtest(
             "horizon_bars": horizon,
             "spread": spread,
             "slippage": slippage,
+            "allow_overlap": allow_overlap,
             "by_direction": by_direction,
             "note": "Deterministic OHLC research backtest. Trigger levels are kept separate from execution prices; entry/exit friction is modeled explicitly. Targets use a 50/30/20% partial-exit ladder with breakeven protection after T1. Same-bar stop/target conflicts use stop-first ordering."
         },
